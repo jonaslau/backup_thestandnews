@@ -1,0 +1,134 @@
+---
+title: "R Notebook for scraping LIHKG"
+---
+
+Install packages: Only needed for first run
+```{r}
+# I follow this site
+# http://joshuamccrain.com/tutorials/web_scraping_R_selenium.html
+# https://github.com/justinchuntingho/LIHKGr/blob/master/R/LIHKGr.R
+
+if (FALSE){
+  install.packages("RSelenium")
+  install.packages("rvest")
+  install.packages("tidyverse")
+}
+
+```
+
+Load packages
+```{r, warning=FALSE}
+library("RSelenium")
+library("rvest")
+library("tidyverse")
+```
+
+Grab all links from thestandnews
+```{r}
+url <- "https://www.thestandnews.com/sitemap.xml"
+  
+doc <- read_html(url)
+```
+
+parse all links
+```{r}
+link_list = NULL
+
+links <- doc %>%
+  html_nodes(xpath = "//loc") %>% # [contains(@class, 'product-title')]")
+  html_text()
+
+# for (i in 1:length(links)){
+# doc_byMonth <- read_html(links[i])
+# 
+# links_byMonth <- doc_byMonth %>%
+#   html_nodes(xpath = "//loc") %>%
+#   html_text()
+# 
+# link_list = c(link_list, links_byMonth)
+# }
+# 
+# write_csv(as.tibble(link_list), path = "thestandnews_link.csv")
+```
+
+Opening up a browser
+```{r}
+# 1. may need to specify path of the firefox browser
+# https://github.com/ropensci/RSelenium/issues/116
+# 2. got java_check() error. Install Java from java.com to resolve
+# use a firfox browser
+rD <- rsDriver(browser = "firefox", port = 4547L, verbose = FALSE)
+
+remDr <- rD[["client"]]
+```
+
+Working with RSelenium
+```{r}
+get_feedback = function(){
+webElem <- remDr$findElement(using = "xpath", 
+                           value = "//span[contains(@class, 'label-success')]")
+x = webElem$getElementText()[[1]]
+
+return(x)
+}
+
+get_error = function(){
+webElem <- remDr$findElement(using = "xpath", 
+                           value = "//div[contains(@id, 'spn-result')]")
+x = webElem$getElementText()[[1]]
+
+x = str_extract(x, "Unknown error|Job failed")
+
+return(x)
+}
+```
+
+For loop for archive.org
+```{r}
+for (i in length(links):1){
+doc_byMonth <- read_html(links[i])
+
+links_byMonth <- doc_byMonth %>%
+  html_nodes(xpath = "//loc") %>%
+  html_text()
+
+for (j in 1:length(links_byMonth)){
+message("loading page #", i, " - ", j)
+
+remDr$navigate("http://web.archive.org/save")
+
+# put in the url in the text box
+remDr$findElement(using = "id", value = "web-save-url-input")$sendKeysToElement(list(links_byMonth[j]))
+
+# save to my web archive
+webElem <- remDr$findElement(using = "xpath",
+                             value = "//input[@id = 'wm-save-mywebarchive']")
+
+webElem$clickElement()
+
+# click the button
+webElem <- remDr$findElement(using = "xpath", 
+                             value = "//input[contains(@class, 'web-save-button')]")
+
+webElem$sendKeysToElement(list(key = "return"))
+
+feedback = "x"
+feedback_error = "x"
+
+while(feedback != "Done!"){
+  Sys.sleep(1)
+  suppressWarnings(
+    feedback = try(get_feedback(), silent = TRUE)
+  )
+  suppressWarnings(
+    feedback_error = try(get_error(), silent = TRUE)
+  )
+  
+  if (!is.na(feedback_error) & 
+      (feedback_error == "Unknown error" | feedback_error == "Job failed")){
+    break
+  }
+}
+}
+}
+```
